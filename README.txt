@@ -76,3 +76,59 @@ FUNKCJE:
 - ogloszenia
 - przyloty z avatar-em
 - Made By : Krvsnall
+
+
+V12:
+- bot nie tworzy kanalow ogloszenia ani przyloty
+- korzysta z juz istniejacych kanalow o nazwach: ogloszenia i przyloty
+- /ogloszenie obsluguje pingi uzytkownikow, rol, @everyone i @here
+- poprawiony wyglad warnow
+
+
+V13 - NAPRAWA PRZYLOTOW
+
+Przyloty sa teraz znajdowane:
+1. po welcomeChannelId z config.json
+2. jesli ID jest puste, po nazwie kanalu "przyloty"
+
+Najpewniejsza konfiguracja:
+"welcomeChannelId": "ID_KANALU_PRZYLOTY"
+
+Bot loguje w konsoli:
+[PRZYLOTY] Nowy uzytkownik...
+[PRZYLOTY] Powitanie wyslane...
+albo dokladny blad.
+
+W Discord Developer Portal musi byc wlaczone:
+SERVER MEMBERS INTENT
+
+Bot musi miec na kanale przyloty:
+- View Channel
+- Send Messages
+- Embed Links
+
+
+V14:
+- /ogloszenie wysyla tresc tylko w embedzie
+- tresc nie pojawia sie juz drugi raz nad embedem
+
+
+V15:
+- usunieto kanal "logi"
+- usunieto kanal "logi-moderacyjne"
+- bot nie tworzy tych kanalow
+- usunieto ogolne logowanie wejsc/wyjsc, edycji/usuniec wiadomosci, banow i zmian nickow
+- zostaja ticket-logi, ostrzezenia-organizacyjne i podania-organizacja
+- naprawiono przyloty:
+  - kanal pobierany po ID przez API, nie tylko z cache
+  - fallback po nazwie "przyloty"
+  - fallback dla nazw z ozdobnikami/emotkami
+  - dokladne sprawdzanie uprawnien
+  - czytelne logi [PRZYLOTY] w Railway
+- dodano /testprzyloty do szybkiego sprawdzenia systemu
+
+W config.json ustaw:
+"welcomeChannelId": "ID_KANALU_PRZYLOTY"
+
+W Discord Developer Portal -> Bot musi byc wlaczone:
+SERVER MEMBERS INTENT

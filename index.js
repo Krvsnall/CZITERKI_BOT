@@ -53,8 +53,6 @@ const NAMES = {
   TICKET_LOGS: "ticket-logi",
   WARN_LOGS: "ostrzezenia-organizacyjne",
   APPLICATION_LOGS: "podania-organizacja",
-  MOD_LOGS: "logi-moderacyjne",
-  GENERAL_LOGS: "logi",
   ADMIN_CHAT: "admin-chat",
   ADMIN_INFO: "admin-informacje",
   ANNOUNCEMENTS: "ogloszenia",
@@ -150,8 +148,6 @@ async function setupGuild(guild) {
   const ticketLogs = await ensureText(guild, NAMES.TICKET_LOGS, admin, true);
   const warnLogs = await ensureText(guild, NAMES.WARN_LOGS, admin, true);
   const applicationLogs = await ensureText(guild, NAMES.APPLICATION_LOGS, admin, true);
-  const modLogs = await ensureText(guild, NAMES.MOD_LOGS, admin, true);
-  const generalLogs = await ensureText(guild, NAMES.GENERAL_LOGS, admin, true);
 
   const announcements = guild.channels.cache.find(
     c => c.type === ChannelType.GuildText && c.name === NAMES.ANNOUNCEMENTS
@@ -187,8 +183,6 @@ async function setupGuild(guild) {
     ticketLogs,
     warnLogs,
     applicationLogs,
-    modLogs,
-    generalLogs,
     announcements,
     welcome,
     panel
@@ -298,33 +292,50 @@ async function logTo(guild, channelName, title, description, files = []) {
   await channel.send(payload).catch(() => {});
 }
 
-async function moderationLog(guild, title, fields) {
-  const channel = guild.channels.cache.find(c => c.name === NAMES.MOD_LOGS);
-  if (!channel) return;
-
-  const embed = new EmbedBuilder()
-    .setTitle(title)
-    .addFields(fields)
-    .setFooter({ text: "Made By : Krvsnall" })
-    .setTimestamp();
-
-  await channel.send({ embeds: [embed] }).catch(() => {});
-}
 
 
-function getWelcomeChannel(guild) {
-  const configuredId = config.welcomeChannelId;
+async function getWelcomeChannel(guild) {
+  const configuredId = String(config.welcomeChannelId || "").trim();
 
+  // Najpewniejsza metoda: ID kanalu z config.json.
   if (configuredId) {
-    const byId = guild.channels.cache.get(configuredId);
-    if (byId && byId.type === ChannelType.GuildText) {
-      return byId;
+    try {
+      const byId = await guild.channels.fetch(configuredId);
+      if (byId && byId.type === ChannelType.GuildText) {
+        return byId;
+      }
+    } catch (err) {
+      console.error(`[PRZYLOTY] Nie udalo sie pobrac kanalu po ID ${configuredId}:`, err.message);
     }
   }
 
-  return guild.channels.cache.find(
-    c => c.type === ChannelType.GuildText && c.name === NAMES.WELCOME
-  ) || null;
+  // Odswiez liste kanalow, zamiast polegac tylko na cache.
+  try {
+    await guild.channels.fetch();
+  } catch (err) {
+    console.error("[PRZYLOTY] Nie udalo sie odswiezyc listy kanalow:", err.message);
+  }
+
+  // Najpierw dokladna nazwa.
+  let byName = guild.channels.cache.find(
+    c => c.type === ChannelType.GuildText && c.name.toLowerCase() === NAMES.WELCOME.toLowerCase()
+  );
+
+  if (byName) return byName;
+
+  // Fallback dla nazw z ozdobnikami/emotkami, np. "・przyloty".
+  byName = guild.channels.cache.find(c => {
+    if (c.type !== ChannelType.GuildText) return false;
+    const normalized = c.name
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "");
+
+    return normalized.includes("przyloty");
+  });
+
+  return byName || null;
 }
 
 async function getWarnMessagesForUser(guild, userId) {
@@ -654,6 +665,10 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("testprzyloty")
+    .setDescription("Testuje wiadomosc na kanale przyloty"),
+
+  new SlashCommandBuilder()
     .setName("zamknij")
     .setDescription("Zamyka aktualny ticket")
 ].map(cmd => cmd.toJSON());
@@ -707,7 +722,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await sendTicketPanel(setup.panel);
       }
 
-      return interaction.editReply("Gotowe. Bot nie tworzy kanalow ogloszenia ani przyloty - korzysta z juz istniejacych.");
+      return interaction.editReply("Gotowe. Bot nie tworzy kanalow ogloszenia ani przyloty. Kanaly logi i logi-moderacyjne zostaly usuniete.");
     }
 
     if (interaction.commandName === "panel") {
@@ -766,29 +781,6 @@ client.on(Events.InteractionCreate, async interaction => {
         warnCount,
         timeoutApplied
       );
-
-      await moderationLog(
-        interaction.guild,
-        "Warn",
-        [
-          { name: "Osoba", value: `${user} (${user.id})`, inline: false },
-          { name: "Administrator", value: `${interaction.user}`, inline: true },
-          { name: "Licznik", value: `${warnCount}/3`, inline: true },
-          { name: "Powod", value: reason.slice(0, 1024), inline: false }
-        ]
-      );
-
-      if (timeoutApplied) {
-        await moderationLog(
-          interaction.guild,
-          "Timeout",
-          [
-            { name: "Osoba", value: `${user} (${user.id})`, inline: false },
-            { name: "Czas", value: "7 dni", inline: true },
-            { name: "Powod", value: "Automatycznie po 3 warnach", inline: false }
-          ]
-        );
-      }
 
       await tryDm(user, {
         embeds: [
@@ -867,18 +859,6 @@ client.on(Events.InteractionCreate, async interaction => {
       await msg.delete().catch(() => {});
       const remaining = await countWarnsForUser(interaction.guild, user.id);
 
-      await moderationLog(
-        interaction.guild,
-        "Usunieto warn",
-        [
-          { name: "Osoba", value: `${user} (${user.id})`, inline: false },
-          { name: "Numer", value: `${number}`, inline: true },
-          { name: "Pozostalo", value: `${remaining}/3`, inline: true },
-          { name: "Powod usunietego warna", value: reason.slice(0, 1024), inline: false },
-          { name: "Administrator", value: `${interaction.user}`, inline: false }
-        ]
-      );
-
       await tryDm(user, {
         embeds: [
           new EmbedBuilder()
@@ -913,16 +893,6 @@ client.on(Events.InteractionCreate, async interaction => {
           deleted++;
         } catch {}
       }
-
-      await moderationLog(
-        interaction.guild,
-        "Wyczyszczono warny",
-        [
-          { name: "Osoba", value: `${user} (${user.id})`, inline: false },
-          { name: "Usunieto", value: `${deleted}`, inline: true },
-          { name: "Administrator", value: `${interaction.user}`, inline: false }
-        ]
-      );
 
       await tryDm(user, {
         embeds: [
@@ -995,17 +965,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply("Nie udalo sie usunac wiadomosci.");
       }
 
-      await moderationLog(
-        interaction.guild,
-        "Clear",
-        [
-          { name: "Kanal", value: `${interaction.channel}`, inline: false },
-          { name: "Administrator", value: `${interaction.user}`, inline: true },
-          { name: "Usunieto", value: `${deletedCount}`, inline: true },
-          { name: "Zakres", value: targetUser ? `Tylko od: ${targetUser}` : "Wszystkie wiadomosci", inline: false }
-        ]
-      );
-
       return interaction.editReply(
         targetUser
           ? `Usunieto ${deletedCount} wiadomosci uzytkownika ${targetUser}.`
@@ -1039,22 +998,56 @@ client.on(Events.InteractionCreate, async interaction => {
         .setTimestamp();
 
       await setup.announcements.send({
-        content,
         embeds: [embed],
         allowedMentions: { parse: ["users", "roles", "everyone"] }
       });
 
-      await moderationLog(
-        interaction.guild,
-        "Ogloszenie",
-        [
-          { name: "Administrator", value: `${interaction.user}`, inline: false },
-          { name: "Kanal", value: `${setup.announcements}`, inline: false },
-          { name: "Tresc", value: content.slice(0, 1024), inline: false }
-        ]
-      );
-
       return interaction.reply({ content: "Ogloszenie zostalo wyslane.", ephemeral: true });
+    }
+
+    if (interaction.commandName === "testprzyloty") {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: "Ta komenda jest tylko dla administracji.",
+          ephemeral: true
+        });
+      }
+
+      const welcome = await getWelcomeChannel(interaction.guild);
+
+      if (!welcome) {
+        return interaction.reply({
+          content: "Nie znaleziono kanalu przyloty. Ustaw welcomeChannelId w config.json.",
+          ephemeral: true
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("Test przylotow")
+        .setDescription(
+          [
+            `Witaj ${interaction.user}, test systemu przylotow dziala poprawnie.`,
+            "",
+            `Aktualna liczba osob: ${interaction.guild.memberCount}.`
+          ].join("\n")
+        )
+        .setThumbnail(interaction.user.displayAvatarURL({ size: 256, extension: "png" }))
+        .setFooter({ text: "CZITERKI | Made By : Krvsnall" })
+        .setTimestamp();
+
+      try {
+        await welcome.send({ embeds: [embed] });
+        return interaction.reply({
+          content: `Test wyslany na ${welcome}.`,
+          ephemeral: true
+        });
+      } catch (err) {
+        console.error("[PRZYLOTY] Blad testu:", err);
+        return interaction.reply({
+          content: "Nie udalo sie wyslac testu. Sprawdz uprawnienia bota do kanalu przyloty.",
+          ephemeral: true
+        });
+      }
     }
 
     if (interaction.commandName === "zamknij") {
@@ -1274,34 +1267,35 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 client.on(Events.GuildMemberAdd, async member => {
-  console.log(`[PRZYLOTY] Nowy uzytkownik: ${member.user.tag} (${member.id})`);
+  console.log(`[PRZYLOTY] Wykryto wejscie: ${member.user.tag} (${member.id})`);
 
-  await logTo(
-    member.guild,
-    NAMES.GENERAL_LOGS,
-    "Dolaczyl uzytkownik",
-    `${member.user.tag} (${member.id})`
-  );
-
-  const welcome = getWelcomeChannel(member.guild);
+  const welcome = await getWelcomeChannel(member.guild);
 
   if (!welcome) {
     console.error(
       `[PRZYLOTY] Nie znaleziono kanalu przyloty. ` +
-      `Ustaw welcomeChannelId w config.json albo nazwij kanal dokladnie: ${NAMES.WELCOME}`
+      `Najlepiej wpisz welcomeChannelId w config.json.`
     );
     return;
   }
 
-  const me = member.guild.members.me;
-  const perms = welcome.permissionsFor(me);
+  const botMember = member.guild.members.me || await member.guild.members.fetchMe().catch(() => null);
 
-  if (!perms?.has(PermissionsBitField.Flags.ViewChannel) ||
-      !perms?.has(PermissionsBitField.Flags.SendMessages) ||
-      !perms?.has(PermissionsBitField.Flags.EmbedLinks)) {
+  if (!botMember) {
+    console.error("[PRZYLOTY] Nie udalo sie pobrac danych bota na serwerze.");
+    return;
+  }
+
+  const perms = welcome.permissionsFor(botMember);
+
+  const missingPerms = [];
+  if (!perms?.has(PermissionsBitField.Flags.ViewChannel)) missingPerms.push("View Channel");
+  if (!perms?.has(PermissionsBitField.Flags.SendMessages)) missingPerms.push("Send Messages");
+  if (!perms?.has(PermissionsBitField.Flags.EmbedLinks)) missingPerms.push("Embed Links");
+
+  if (missingPerms.length) {
     console.error(
-      `[PRZYLOTY] Bot nie ma uprawnien do kanalu ${welcome.name}. ` +
-      `Potrzebne: View Channel, Send Messages, Embed Links.`
+      `[PRZYLOTY] Brak uprawnien na #${welcome.name}: ${missingPerms.join(", ")}`
     );
     return;
   }
@@ -1321,81 +1315,16 @@ client.on(Events.GuildMemberAdd, async member => {
 
   try {
     await welcome.send({ embeds: [embed] });
-    console.log(`[PRZYLOTY] Powitanie wyslane na #${welcome.name}`);
+    console.log(`[PRZYLOTY] Powitanie wyslane na #${welcome.name} (${welcome.id})`);
   } catch (err) {
-    console.error("[PRZYLOTY] Nie udalo sie wyslac powitania:", err);
+    console.error("[PRZYLOTY] Blad wysylania powitania:", err);
   }
 });
 
-client.on(Events.GuildMemberRemove, async member => {
-  await logTo(
-    member.guild,
-    NAMES.GENERAL_LOGS,
-    "Uzytkownik opuscil serwer",
-    `${member.user.tag} (${member.id})`
-  );
-});
 
-client.on(Events.MessageDelete, async message => {
-  if (!message.guild || message.author?.bot) return;
 
-  await logTo(
-    message.guild,
-    NAMES.GENERAL_LOGS,
-    "Usunieta wiadomosc",
-    [
-      `Autor: ${message.author?.tag || "nieznany"}`,
-      `Kanal: ${message.channel}`,
-      `Tresc: ${(message.content || "brak tresci").slice(0, 1500)}`
-    ].join("\n")
-  );
-});
 
-client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
-  if (!newMessage.guild || newMessage.author?.bot) return;
-  if (oldMessage.content === newMessage.content) return;
 
-  await logTo(
-    newMessage.guild,
-    NAMES.GENERAL_LOGS,
-    "Edytowana wiadomosc",
-    [
-      `Autor: ${newMessage.author?.tag || "nieznany"}`,
-      `Kanal: ${newMessage.channel}`,
-      `Przed: ${(oldMessage.content || "brak").slice(0, 700)}`,
-      `Po: ${(newMessage.content || "brak").slice(0, 700)}`
-    ].join("\n")
-  );
-});
 
-client.on(Events.GuildBanAdd, async ban => {
-  await moderationLog(
-    ban.guild,
-    "Ban",
-    [{ name: "Osoba", value: `${ban.user.tag} (${ban.user.id})`, inline: false }]
-  );
-});
-
-client.on(Events.GuildBanRemove, async ban => {
-  await moderationLog(
-    ban.guild,
-    "Unban",
-    [{ name: "Osoba", value: `${ban.user.tag} (${ban.user.id})`, inline: false }]
-  );
-});
-
-client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
-  if (oldMember.nickname !== newMember.nickname) {
-    await moderationLog(
-      newMember.guild,
-      "Zmiana nicku",
-      [
-        { name: "Osoba", value: `${newMember.user} (${newMember.id})`, inline: false },
-        { name: "Przed", value: oldMember.nickname || oldMember.user.username, inline: true },
-        { name: "Po", value: newMember.nickname || newMember.user.username, inline: true }
-      ]
-    );
-  }
-});
 
 client.login(TOKEN);
