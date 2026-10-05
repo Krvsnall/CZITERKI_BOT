@@ -1,0 +1,14 @@
+{
+  "name": "clowns-cool-organization-bot",
+  "version": "2.0.0",
+  "description": "Bot Discord dla organizacji FiveM clowns.cool",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord-html-transcripts": "^3.2.0",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7"
+  }
+}
