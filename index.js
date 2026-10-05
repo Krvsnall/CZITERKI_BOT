@@ -153,42 +153,13 @@ async function setupGuild(guild) {
   const modLogs = await ensureText(guild, NAMES.MOD_LOGS, admin, true);
   const generalLogs = await ensureText(guild, NAMES.GENERAL_LOGS, admin, true);
 
-  let announcements = guild.channels.cache.find(c => c.type === ChannelType.GuildText && c.name === NAMES.ANNOUNCEMENTS);
-  if (!announcements) {
-    announcements = await guild.channels.create({
-      name: NAMES.ANNOUNCEMENTS,
-      type: ChannelType.GuildText,
-      permissionOverwrites: [
-        {
-          id: guild.roles.everyone.id,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.ReadMessageHistory
-          ],
-          deny: [PermissionsBitField.Flags.SendMessages]
-        },
-        ...staffOverwrites(guild)
-      ]
-    });
-  }
+  const announcements = guild.channels.cache.find(
+    c => c.type === ChannelType.GuildText && c.name === NAMES.ANNOUNCEMENTS
+  );
 
-  let welcome = guild.channels.cache.find(c => c.type === ChannelType.GuildText && c.name === NAMES.WELCOME);
-  if (!welcome) {
-    welcome = await guild.channels.create({
-      name: NAMES.WELCOME,
-      type: ChannelType.GuildText,
-      permissionOverwrites: [
-        {
-          id: guild.roles.everyone.id,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.ReadMessageHistory
-          ],
-          deny: [PermissionsBitField.Flags.SendMessages]
-        }
-      ]
-    });
-  }
+  const welcome = guild.channels.cache.find(
+    c => c.type === ChannelType.GuildText && c.name === NAMES.WELCOME
+  );
 
   let panel = guild.channels.cache.find(c => c.type === ChannelType.GuildText && c.name === NAMES.TICKET_PANEL);
   if (!panel) {
@@ -340,6 +311,22 @@ async function moderationLog(guild, title, fields) {
   await channel.send({ embeds: [embed] }).catch(() => {});
 }
 
+
+function getWelcomeChannel(guild) {
+  const configuredId = config.welcomeChannelId;
+
+  if (configuredId) {
+    const byId = guild.channels.cache.get(configuredId);
+    if (byId && byId.type === ChannelType.GuildText) {
+      return byId;
+    }
+  }
+
+  return guild.channels.cache.find(
+    c => c.type === ChannelType.GuildText && c.name === NAMES.WELCOME
+  ) || null;
+}
+
 async function getWarnMessagesForUser(guild, userId) {
   const channel = guild.channels.cache.find(c => c.name === NAMES.WARN_LOGS);
   if (!channel) return [];
@@ -391,27 +378,25 @@ async function sendWarnLog(guild, targetUser, moderatorUser, reason, warnCount, 
   const channel = guild.channels.cache.find(c => c.name === NAMES.WARN_LOGS);
   if (!channel) return;
 
+  const remaining = Math.max(0, 3 - warnCount);
+
   const embed = new EmbedBuilder()
     .setTitle("Ostrzezenie organizacyjne")
-    .setDescription("Uzytkownik otrzymal ostrzezenie organizacyjne.")
+    .setDescription(
+      warnCount >= 3
+        ? `${targetUser} osiagnal limit ostrzezen.`
+        : `${targetUser} otrzymal ostrzezenie. Do automatycznej kary pozostalo: ${remaining}.`
+    )
     .addFields(
       { name: "Uzytkownik", value: `${targetUser}`, inline: true },
-      { name: "Liczba ostrzezen", value: `${warnCount}/3`, inline: true },
-      { name: "Nadane przez", value: `${moderatorUser}`, inline: true },
-      { name: "ID uzytkownika", value: targetUser.id, inline: false },
+      { name: "Stan ostrzezen", value: `${warnCount}/3`, inline: true },
+      { name: "Administrator", value: `${moderatorUser}`, inline: true },
       { name: "Powod", value: reason.slice(0, 1024), inline: false },
-      {
-        name: "Kara automatyczna",
-        value: timeoutApplied
-          ? "Timeout na 7 dni za osiagniecie 3 ostrzezen."
-          : warnCount < 3
-            ? `Brak. Do automatycznej kary pozostalo: ${3 - warnCount}.`
-            : "Brak nowej kary.",
-        inline: false
-      }
+      { name: "Kara", value: timeoutApplied ? "Timeout na 7 dni" : "Brak", inline: true },
+      { name: "ID uzytkownika", value: targetUser.id, inline: true }
     )
     .setThumbnail(targetUser.displayAvatarURL({ size: 256 }))
-    .setFooter({ text: "Made By : Krvsnall" })
+    .setFooter({ text: "CZITERKI | Made By : Krvsnall" })
     .setTimestamp();
 
   await channel.send({ embeds: [embed] });
@@ -663,7 +648,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("ogloszenie")
-    .setDescription("Wysyla ogloszenie jako bot")
+    .setDescription("Wysyla ogloszenie jako bot i pozwala pingowac")
     .addStringOption(o =>
       o.setName("tresc").setDescription("Tresc ogloszenia").setRequired(true)
     ),
@@ -722,7 +707,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await sendTicketPanel(setup.panel);
       }
 
-      return interaction.editReply("Gotowe. Utworzono potrzebne kanaly i panel.");
+      return interaction.editReply("Gotowe. Bot nie tworzy kanalow ogloszenia ani przyloty - korzysta z juz istniejacych.");
     }
 
     if (interaction.commandName === "panel") {
@@ -1036,13 +1021,28 @@ client.on(Events.InteractionCreate, async interaction => {
       const content = interaction.options.getString("tresc");
       const setup = await setupGuild(interaction.guild);
 
+      if (!setup.announcements) {
+        return interaction.reply({
+          content: "Nie znaleziono kanalu ogloszenia. Kanal musi nazywac sie dokladnie: ogloszenia",
+          ephemeral: true
+        });
+      }
+
       const embed = new EmbedBuilder()
-        .setTitle("Ogloszenie")
+        .setTitle("Ogloszenie organizacji")
         .setDescription(content)
-        .setFooter({ text: "Made By : Krvsnall" })
+        .addFields(
+          { name: "Opublikowal", value: `${interaction.user}`, inline: true },
+          { name: "Serwer", value: "CZITERKI", inline: true }
+        )
+        .setFooter({ text: "CZITERKI | Made By : Krvsnall" })
         .setTimestamp();
 
-      await setup.announcements.send({ embeds: [embed] });
+      await setup.announcements.send({
+        content,
+        embeds: [embed],
+        allowedMentions: { parse: ["users", "roles", "everyone"] }
+      });
 
       await moderationLog(
         interaction.guild,
@@ -1274,6 +1274,8 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 client.on(Events.GuildMemberAdd, async member => {
+  console.log(`[PRZYLOTY] Nowy uzytkownik: ${member.user.tag} (${member.id})`);
+
   await logTo(
     member.guild,
     NAMES.GENERAL_LOGS,
@@ -1281,22 +1283,47 @@ client.on(Events.GuildMemberAdd, async member => {
     `${member.user.tag} (${member.id})`
   );
 
-  const welcome = member.guild.channels.cache.find(c => c.name === NAMES.WELCOME);
-  if (welcome) {
-    const embed = new EmbedBuilder()
-      .setTitle("Nowy uzytkownik")
-      .setDescription(
-        [
-          `Witaj ${member}, jako nowy uzytkownik serwera CZITERKI!`,
-          "",
-          `Jestes naszym ${member.guild.memberCount}. uzytkownikiem!`
-        ].join("\n")
-      )
-      .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
-      .setFooter({ text: "CZITERKI | Made By : Krvsnall" })
-      .setTimestamp();
+  const welcome = getWelcomeChannel(member.guild);
 
-    await welcome.send({ embeds: [embed] }).catch(() => {});
+  if (!welcome) {
+    console.error(
+      `[PRZYLOTY] Nie znaleziono kanalu przyloty. ` +
+      `Ustaw welcomeChannelId w config.json albo nazwij kanal dokladnie: ${NAMES.WELCOME}`
+    );
+    return;
+  }
+
+  const me = member.guild.members.me;
+  const perms = welcome.permissionsFor(me);
+
+  if (!perms?.has(PermissionsBitField.Flags.ViewChannel) ||
+      !perms?.has(PermissionsBitField.Flags.SendMessages) ||
+      !perms?.has(PermissionsBitField.Flags.EmbedLinks)) {
+    console.error(
+      `[PRZYLOTY] Bot nie ma uprawnien do kanalu ${welcome.name}. ` +
+      `Potrzebne: View Channel, Send Messages, Embed Links.`
+    );
+    return;
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle("Nowy uzytkownik")
+    .setDescription(
+      [
+        `Witaj ${member}, jako nowy uzytkownik serwera CZITERKI!`,
+        "",
+        `Jestes naszym ${member.guild.memberCount}. uzytkownikiem!`
+      ].join("\n")
+    )
+    .setThumbnail(member.user.displayAvatarURL({ size: 256, extension: "png" }))
+    .setFooter({ text: "CZITERKI | Made By : Krvsnall" })
+    .setTimestamp();
+
+  try {
+    await welcome.send({ embeds: [embed] });
+    console.log(`[PRZYLOTY] Powitanie wyslane na #${welcome.name}`);
+  } catch (err) {
+    console.error("[PRZYLOTY] Nie udalo sie wyslac powitania:", err);
   }
 });
 
