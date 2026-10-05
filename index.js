@@ -195,17 +195,20 @@ function panelComponents() {
       {
         label: "Do organizacji",
         value: "organizacja",
-        description: "Podanie do organizacji"
+        description: "Podanie do organizacji",
+        emoji: "📋"
       },
       {
         label: "Pomoc",
         value: "pomoc",
-        description: "Pomoc dotyczaca organizacji lub Discorda"
+        description: "Pomoc dotyczaca organizacji lub Discorda",
+        emoji: "🛠️"
       },
       {
         label: "Inne",
         value: "inne",
-        description: "Pozostale sprawy"
+        description: "Pozostale sprawy",
+        emoji: "💬"
       }
     );
 
@@ -214,16 +217,16 @@ function panelComponents() {
 
 async function sendTicketPanel(channel) {
   const embed = new EmbedBuilder()
-    .setTitle("System ticketow")
+    .setTitle("🎫 System ticketow")
     .setDescription(
       [
         "Wybierz ponizej rodzaj ticketu.",
         "",
-        "Do organizacji - podanie do organizacji.",
-        "Pomoc - pytania i problemy.",
-        "Inne - pozostale sprawy.",
+        "📋 Do organizacji - podanie do organizacji.",
+        "🛠️ Pomoc - pytania i problemy.",
+        "💬 Inne - pozostale sprawy.",
         "",
-        "Mozesz miec tylko jeden otwarty ticket."
+        "🔒 Mozesz miec tylko jeden otwarty ticket."
       ].join("\n")
     )
     .setFooter({ text: "clowns.cool" });
@@ -240,21 +243,25 @@ function ticketButtons() {
       new ButtonBuilder()
         .setCustomId("ticket_claim")
         .setLabel("Przejmij")
+        .setEmoji("👤")
         .setStyle(ButtonStyle.Secondary),
 
       new ButtonBuilder()
         .setCustomId("ticket_status_waiting")
         .setLabel("Oczekuje")
+        .setEmoji("⏳")
         .setStyle(ButtonStyle.Secondary),
 
       new ButtonBuilder()
         .setCustomId("ticket_status_progress")
         .setLabel("W trakcie")
+        .setEmoji("🔄")
         .setStyle(ButtonStyle.Primary),
 
       new ButtonBuilder()
         .setCustomId("ticket_close")
         .setLabel("Zamknij")
+        .setEmoji("🔒")
         .setStyle(ButtonStyle.Danger)
     )
   ];
@@ -348,6 +355,72 @@ async function logTo(guild, channelName, title, description, files = []) {
   await channel.send(payload).catch(() => {});
 }
 
+
+async function countWarnsForUser(guild, userId) {
+  const channel = guild.channels.cache.find(c => c.name === NAMES.WARN_LOGS);
+  if (!channel) return 0;
+
+  let before;
+  let count = 0;
+
+  while (true) {
+    const batch = await channel.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {})
+    }).catch(() => null);
+
+    if (!batch || batch.size === 0) break;
+
+    for (const message of batch.values()) {
+      if (message.author.id !== client.user.id) continue;
+
+      for (const embed of message.embeds) {
+        if (embed.title !== "Ostrzezenie organizacyjne") continue;
+
+        const idField = embed.fields?.find(f => f.name === "ID uzytkownika");
+        if (idField?.value === userId) {
+          count++;
+        }
+      }
+    }
+
+    if (batch.size < 100) break;
+    before = batch.last().id;
+  }
+
+  return count;
+}
+
+async function sendWarnLog(guild, targetUser, moderatorUser, reason, warnCount, muteApplied) {
+  const channel = guild.channels.cache.find(c => c.name === NAMES.WARN_LOGS);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle("Ostrzezenie organizacyjne")
+    .setDescription(`Uzytkownik otrzymal ostrzezenie organizacyjne.`)
+    .addFields(
+      { name: "Uzytkownik", value: `${targetUser}`, inline: true },
+      { name: "Liczba ostrzezen", value: `${warnCount}/3`, inline: true },
+      { name: "Nadane przez", value: `${moderatorUser}`, inline: true },
+      { name: "ID uzytkownika", value: targetUser.id, inline: false },
+      { name: "Powod", value: reason.slice(0, 1024), inline: false },
+      {
+        name: "Kara automatyczna",
+        value: muteApplied
+          ? "Wyciszenie na 7 dni za osiagniecie 3 ostrzezen."
+          : warnCount < 3
+            ? `Brak. Do automatycznego wyciszenia pozostalo: ${3 - warnCount}.`
+            : "Brak nowej kary przy tym ostrzezeniu.",
+        inline: false
+      }
+    )
+    .setThumbnail(targetUser.displayAvatarURL({ size: 256 }))
+    .setFooter({ text: "System ostrzezen organizacyjnych" })
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+}
+
 async function createTicket(interaction, type) {
   const guild = interaction.guild;
   const setup = await setupGuild(guild);
@@ -408,11 +481,11 @@ async function createTicket(interaction, type) {
   });
 
   const embed = new EmbedBuilder()
-    .setTitle(`Ticket - ${labels[type]}`)
+    .setTitle(`🎫 Ticket - ${labels[type]}`)
     .setDescription(
       [
-        `Autor: ${interaction.user}`,
-        `Status: Otwarty`,
+        `👤 Autor: ${interaction.user}`,
+        `🟢 Status: Otwarty`,
         "",
         type === "organizacja"
           ? "Uzupelnij formularz podania. Jezeli masz screen KD jako plik, wyslij go potem na tym kanale."
@@ -444,6 +517,7 @@ async function createTicket(interaction, type) {
       new ButtonBuilder()
         .setCustomId("open_application")
         .setLabel("Wypelnij podanie")
+        .setEmoji("📝")
         .setStyle(ButtonStyle.Primary)
     );
 
@@ -455,7 +529,7 @@ async function createTicket(interaction, type) {
     return;
   }
 
-  return interaction.editReply(`Ticket utworzony: ${channel}`);
+  return interaction.editReply(`🎫 Ticket utworzony: ${channel}`);
 }
 
 async function closeTicket(interaction) {
@@ -477,9 +551,15 @@ async function closeTicket(interaction) {
     transcript = await discordTranscripts.createTranscript(interaction.channel, {
       limit: -1,
       returnType: "attachment",
-      filename: `${interaction.channel.name}.html`,
+      filename: `transkrypt-${interaction.channel.name}-${Date.now()}.html`,
       saveImages: true,
-      poweredBy: false
+      poweredBy: false,
+      footerText: "clowns.cool - transkrypt ticketu",
+      callbacks: {
+        resolveChannel: channelId => interaction.guild.channels.cache.get(channelId)?.name || channelId,
+        resolveUser: userId => interaction.guild.members.cache.get(userId)?.user?.tag || userId,
+        resolveRole: roleId => interaction.guild.roles.cache.get(roleId)?.name || roleId
+      }
     });
   } catch (err) {
     console.error("Blad transkryptu:", err);
@@ -529,18 +609,47 @@ client.once(Events.ClientReady, async () => {
       ),
 
     new SlashCommandBuilder()
+      .setName("warny")
+      .setDescription("Pokazuje liczbe ostrzezen organizacyjnych")
+      .addUserOption(o =>
+        o.setName("osoba")
+          .setDescription("Osoba")
+          .setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("clear")
+      .setDescription("Usuwa wiadomosci z aktualnego kanalu")
+      .addIntegerOption(o =>
+        o.setName("ilosc")
+          .setDescription("Ile wiadomosci usunac")
+          .setMinValue(1)
+          .setMaxValue(100)
+          .setRequired(true)
+      )
+      .addUserOption(o =>
+        o.setName("osoba")
+          .setDescription("Opcjonalnie: usun tylko wiadomosci tej osoby")
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
       .setName("zamknij")
       .setDescription("Zamyka aktualny ticket")
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
+  try {
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
 
-  console.log("Komendy zostaly zarejestrowane.");
+    console.log("Komendy zostaly zarejestrowane globalnie.");
+  } catch (err) {
+    console.error("Blad rejestracji komend:", err);
+  }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -599,24 +708,191 @@ client.on(Events.InteractionCreate, async interaction => {
       const user = interaction.options.getUser("osoba");
       const reason = interaction.options.getString("powod");
 
+      if (user.bot) {
+        return interaction.reply({
+          content: "Nie mozna nadac ostrzezenia botowi.",
+          ephemeral: true
+        });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
       await setupGuild(interaction.guild);
+
+      const previousWarns = await countWarnsForUser(interaction.guild, user.id);
+      const warnCount = previousWarns + 1;
+
+      let muteApplied = false;
+      let muteError = null;
+
+      if (warnCount === 3) {
+        try {
+          const member = await interaction.guild.members.fetch(user.id);
+
+          if (!member.moderatable) {
+            muteError = "Bot nie moze wyciszyc tej osoby. Sprawdz hierarchie rang i uprawnienie Moderowanie czlonkow.";
+          } else {
+            await member.timeout(
+              7 * 24 * 60 * 60 * 1000,
+              `3 ostrzezenia organizacyjne. Ostatni powod: ${reason}`
+            );
+            muteApplied = true;
+          }
+        } catch (err) {
+          console.error("Blad automatycznego wyciszenia:", err);
+          muteError = "Nie udalo sie automatycznie wyciszyc tej osoby.";
+        }
+      }
+
+      await sendWarnLog(
+        interaction.guild,
+        user,
+        interaction.user,
+        reason,
+        warnCount,
+        muteApplied
+      );
+
+      let response = `Ostrzezenie zostalo nadane. Liczba ostrzezen: ${warnCount}/3.`;
+
+      if (muteApplied) {
+        response += " Uzytkownik zostal automatycznie wyciszony na 7 dni.";
+      } else if (warnCount === 3 && muteError) {
+        response += ` ${muteError}`;
+      }
+
+      return interaction.editReply(response);
+    }
+
+    if (interaction.commandName === "warny") {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: "Ta komenda jest tylko dla administracji.",
+          ephemeral: true
+        });
+      }
+
+      const user = interaction.options.getUser("osoba");
+      await setupGuild(interaction.guild);
+
+      const count = await countWarnsForUser(interaction.guild, user.id);
+
+      const embed = new EmbedBuilder()
+        .setTitle("Ostrzezenia organizacyjne")
+        .addFields(
+          { name: "Uzytkownik", value: `${user}`, inline: true },
+          { name: "Liczba ostrzezen", value: `${count}/3`, inline: true },
+          {
+            name: "Automatyczna kara",
+            value: count >= 3
+              ? "Prog 3 ostrzezen zostal osiagniety."
+              : `Do wyciszenia na 7 dni pozostalo: ${3 - count}.`,
+            inline: false
+          }
+        )
+        .setThumbnail(user.displayAvatarURL({ size: 256 }))
+        .setTimestamp();
+
+      return interaction.reply({
+        embeds: [embed],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "clear") {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: "Ta komenda jest tylko dla administracji.",
+          ephemeral: true
+        });
+      }
+
+      if (!interaction.channel || !interaction.channel.isTextBased()) {
+        return interaction.reply({
+          content: "Tej komendy mozna uzyc tylko na kanale tekstowym.",
+          ephemeral: true
+        });
+      }
+
+      const amount = interaction.options.getInteger("ilosc");
+      const targetUser = interaction.options.getUser("osoba");
+
+      await interaction.deferReply({ ephemeral: true });
+
+      let selected = [];
+      let before;
+      let scanned = 0;
+      const maxScan = targetUser ? 1000 : 100;
+
+      while (selected.length < amount && scanned < maxScan) {
+        const fetchLimit = Math.min(100, maxScan - scanned);
+
+        const batch = await interaction.channel.messages.fetch({
+          limit: fetchLimit,
+          ...(before ? { before } : {})
+        }).catch(() => null);
+
+        if (!batch || batch.size === 0) break;
+
+        scanned += batch.size;
+
+        for (const message of batch.values()) {
+          if (selected.length >= amount) break;
+
+          // Discord nie pozwala bulk-delete wiadomosci starszych niz 14 dni.
+          const fourteenDays = 14 * 24 * 60 * 60 * 1000;
+          if (Date.now() - message.createdTimestamp >= fourteenDays) continue;
+
+          if (targetUser && message.author.id !== targetUser.id) continue;
+
+          selected.push(message);
+        }
+
+        before = batch.last()?.id;
+        if (batch.size < fetchLimit) break;
+      }
+
+      if (selected.length === 0) {
+        return interaction.editReply(
+          targetUser
+            ? `Nie znaleziono ostatnich wiadomosci uzytkownika ${targetUser} mozliwych do usuniecia.`
+            : "Nie znaleziono wiadomosci mozliwych do usuniecia."
+        );
+      }
+
+      let deletedCount = 0;
+
+      try {
+        if (selected.length === 1) {
+          await selected[0].delete();
+          deletedCount = 1;
+        } else {
+          const result = await interaction.channel.bulkDelete(selected, true);
+          deletedCount = result.size;
+        }
+      } catch (err) {
+        console.error("Blad /clear:", err);
+        return interaction.editReply(
+          "Nie udalo sie usunac wiadomosci. Sprawdz uprawnienie Zarzadzanie wiadomosciami."
+        );
+      }
 
       await logTo(
         interaction.guild,
-        NAMES.WARN_LOGS,
-        "Ostrzezenie organizacyjne",
+        NAMES.GENERAL_LOGS,
+        "Czyszczenie wiadomosci",
         [
-          `Osoba: ${user}`,
-          `ID: ${user.id}`,
-          `Powod: ${reason}`,
-          `Nadal: ${interaction.user}`
+          `Kanal: ${interaction.channel}`,
+          `Administrator: ${interaction.user}`,
+          `Usunieto: ${deletedCount}`,
+          targetUser ? `Tylko od uzytkownika: ${targetUser}` : "Tryb: ogolny"
         ].join("\n")
       );
 
-      return interaction.reply({
-        content: `Ostrzezenie dla ${user} zostalo zapisane.`,
-        ephemeral: true
-      });
+      return interaction.editReply(
+        targetUser
+          ? `Usunieto ${deletedCount} wiadomosci uzytkownika ${targetUser} z tego kanalu.`
+          : `Usunieto ${deletedCount} wiadomosci z tego kanalu.`
+      );
     }
 
     if (interaction.commandName === "zamknij") {
@@ -687,7 +963,7 @@ client.on(Events.InteractionCreate, async interaction => {
         `Kanal: ${interaction.channel}\nStatus: Oczekuje\nZmienil: ${interaction.user}`
       );
 
-      return interaction.reply("Status ticketu: Oczekuje");
+      return interaction.reply("⏳ Status ticketu: Oczekuje");
     }
 
     if (interaction.customId === "ticket_status_progress") {
@@ -707,7 +983,7 @@ client.on(Events.InteractionCreate, async interaction => {
         `Kanal: ${interaction.channel}\nStatus: W trakcie\nZmienil: ${interaction.user}`
       );
 
-      return interaction.reply("Status ticketu: W trakcie");
+      return interaction.reply("🔄 Status ticketu: W trakcie");
     }
 
     if (interaction.customId === "ticket_close") {
