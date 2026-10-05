@@ -642,11 +642,11 @@ client.once(Events.ClientReady, async () => {
 
   try {
     await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
       { body: commands }
     );
 
-    console.log("Komendy zostaly zarejestrowane globalnie.");
+    console.log("Komendy zostaly zarejestrowane na serwerze.");
   } catch (err) {
     console.error("Blad rejestracji komend:", err);
   }
